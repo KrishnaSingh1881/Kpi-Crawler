@@ -1,0 +1,26 @@
+[project]
+name = "kpi-crawler"
+version = "0.1.0"
+description = "Foundation for the KPI crawler"
+requires-python = ">=3.12"
+dependencies = [
+    "docling-slim[convert-core]>=2,<3",
+    "docling-parse>=7.20,<8",
+    "pypdfium2>=4.30,<6",
+    "psycopg[binary]>=3.2,<4",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+]
+
+[project.scripts]
+kpi-crawler = "kpi_crawler.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
