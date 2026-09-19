@@ -265,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=settings.acquisition_timeout_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
             max_retries=settings.acquisition_retries + 1,
-            storage_dir=settings.artifact_storage_dir / "acquisition_engine",
+            storage_dir=Path(".data"),
         )
         sink = TerminalEventSink(verbose=args.verbose)
 

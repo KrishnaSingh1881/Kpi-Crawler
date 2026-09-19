@@ -275,6 +275,43 @@ Finished `kpi-crawler-acquire` as a reliable operator interface over the existin
 
 **Remaining limitations, honestly recorded:** the repeated-5xx/timeout-escalation and retry-exhaustion events are derived from the existing per-attempt retry loop's own state, not a new dedicated policy subsystem — they fire correctly but are simple threshold checks, not a generalized "failure pattern" engine. No live-updating single-line spinner was built (a deliberate choice, not a limitation — see above). Ctrl+C's "first press" responsiveness is bounded by how long the *current* in-flight HTTP/browser call takes to return (up to the configured timeout) since no request is aborted mid-flight; a genuinely hung request will delay the graceful shutdown until it times out, matching "never abort a request mid-call, never corrupt the ledger" rather than a harder, more invasive cancellation.
 
+## Program 1 run-scoped storage isolation architecture (2026-09-19)
+
+Frozen acquisition behavior and redesigned Program 1 storage so every acquisition run is completely isolated, self-contained, and portable.
+
+**Target structure achieved:**
+```
+.data/
+└── runs/
+    └── <safe-site-id>/
+        └── <run-id>/
+            ├── raw/
+            │   ├── html/
+            │   ├── json/
+            │   ├── pdf/
+            │   └── other/
+            ├── evidence/
+            │   ├── attempts.jsonl
+            │   └── adaptive_decisions.jsonl
+            ├── manifest.json
+            └── program2/
+                ├── artifacts.json
+                ├── metadata.json
+                └── provenance.json
+```
+
+**Implementation details:**
+- `safe_site_id(url)` sanitizes network locations (ports, special chars) into directory-safe tokens.
+- `classify_content_type(content_type, url)` sorts raw artifacts into subdirectories `raw/html`, `raw/json`, `raw/pdf`, and `raw/other`.
+- `RunStorage` manages the per-run directory structure:
+  - Enforces path containment (`relative_to(run_dir)`) to prevent path traversal escapes.
+  - Automatically writes raw artifacts, attempts, and adaptive decisions.
+  - Compiles self-contained top-level `manifest.json`.
+  - Generates the Program 2 handoff package in `program2/` (`artifacts.json`, `metadata.json`, `provenance.json`), decoupling Program 2 from Crawlee/Playwright/proxy/session internals while preserving the contract.
+- Authoritative boundary: PostgreSQL remains the authoritative source for structured ledger metadata and relations; filesystem provides the raw artifact storage and portable run package.
+- Full database clean reset verified: schemas `acq` and `app` dropped and recreated cleanly across all 11 migrations.
+- Complete test coverage in `tests/test_acquisition_engine_storage.py` proving all 8 target requirements. Full test suite passes (238 passed, 1 skipped).
+
 ## Unresolved issues
 
 - No domain behavior, KPI models, relevance, scoring, scheduling, or API has been implemented because those belong to later phases.

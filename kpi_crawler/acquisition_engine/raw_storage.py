@@ -1,10 +1,7 @@
-"""Content-addressed raw artifact storage.
+"""Content-addressed raw artifact storage helper.
 
-Same convention as `kpi_crawler.acquisition`'s existing raw storage (SHA-256
-filename under a storage directory, atomic write via a temp file + rename) so
-raw bytes on disk stay compatible across both acquisition paths — but
-implemented independently here since it is Program 1's own concern, not a
-shared internal dependency on the older module.
+Maintained for backwards compatibility; run-scoped acquisition engine runs
+delegate to `RunStorage` in `kpi_crawler.acquisition_engine.storage`.
 """
 
 import os
@@ -15,7 +12,15 @@ from ..errors import StorageError
 
 
 def write_raw(content: bytes, storage_dir: Path, checksum: str) -> Path:
-    path = storage_dir / f"{checksum}.raw"
+    storage_dir = Path(storage_dir).resolve()
+    path = (storage_dir / f"{checksum}.raw").resolve()
+
+    # Path containment check
+    try:
+        path.relative_to(storage_dir)
+    except ValueError as exc:
+        raise StorageError(f"security violation: artifact path escapes storage directory: {exc}") from exc
+
     temporary_path: Path | None = None
     try:
         storage_dir.mkdir(parents=True, exist_ok=True)

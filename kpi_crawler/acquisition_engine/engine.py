@@ -29,6 +29,7 @@ from .ledger import EvidenceLedger
 from .proxy import ProxyConfig, ProxyHealthState, ProxyPool
 from .raw_storage import write_raw
 from .sessions import SessionHealth, SessionManager
+from .storage import RunStorage, safe_site_id
 
 
 @dataclass
@@ -55,7 +56,7 @@ class EngineConfig:
     # retry_number) that triggers a one-time "repeated failures" important
     # event, so an operator sees it without every single retry being noisy.
     repeated_failure_threshold: int = 2
-    storage_dir: Path = Path(".data/acquisition_engine")
+    storage_dir: Path = Path(".data")
 
 
 def _normalize(url: str) -> str:
@@ -109,6 +110,7 @@ class AcquisitionEngine:
         self._start_time = 0.0
         self._stop_ticker = threading.Event()
         self._cancelled = threading.Event()
+        self._run_storage: RunStorage | None = None
 
     def request_shutdown(self) -> None:
         """Cooperative cancellation: stop scheduling new waves and stop
@@ -392,7 +394,9 @@ class AcquisitionEngine:
         self, run_id, source_url, discovered_from, method, content, content_type, http_status, final_url, redirect_chain, session_id,
     ):
         checksum = hashlib.sha256(content).hexdigest()
-        raw_path = write_raw(content, self._config.storage_dir, checksum)
+        if self._run_storage is None:
+            self._run_storage = RunStorage(self._config.storage_dir, safe_site_id(source_url), run_id)
+        raw_path = self._run_storage.write_raw_artifact(content, checksum, content_type, source_url)
         return self._ledger.record_artifact(
             run_id=run_id, source_url=source_url, canonical_url=None, discovered_from=discovered_from,
             fetched_at=datetime.now(timezone.utc), content_type=content_type, http_status=http_status,
@@ -403,6 +407,8 @@ class AcquisitionEngine:
 
     def run(self, root_url: str) -> tuple[RunSummary, int]:
         run_id = self._ledger.create_run(root_url)
+        site_id = safe_site_id(root_url)
+        self._run_storage = RunStorage(self._config.storage_dir, site_id, run_id)
         root_domain = _domain(root_url)
         self._emit_important("🚀", "Starting acquisition")
         self._emit_important("🌐", root_domain)
@@ -486,10 +492,16 @@ class AcquisitionEngine:
         decisions = self._ledger.adaptive_decisions_for_run(run_id)
         adaptive_action_counts = dict(Counter(d.decision_type for d in decisions))
 
+        artifacts = self._ledger.artifacts_for_run(run_id)
+        attempts = self._ledger.attempts_for_run(run_id)
+        self._run_storage.write_evidence(attempts, decisions)
+        self._run_storage.write_program2_handoff(artifacts, summary)
+        self._run_storage.write_manifest(summary, artifacts)
+
         self._sink.emit(
             FinalSummaryEvent(
                 summary=summary,
-                evidence_path=str(self._config.storage_dir),
+                evidence_path=str(self._run_storage.run_dir),
                 adaptive_action_counts=adaptive_action_counts,
             )
         )
