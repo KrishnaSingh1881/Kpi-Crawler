@@ -8,3 +8,5 @@ __pycache__/
 graphify-out/
 DOC-20260901-WA0019.xlsx
 *.xlsx
+demo.sh
+run.sh
