@@ -8,6 +8,10 @@ dependencies = [
     "docling-parse>=7.20,<8",
     "pypdfium2>=4.30,<6",
     "psycopg[binary]>=3.2,<4",
+    "openpyxl>=3.1.5",
+    "pgvector>=0.5.0",
+    "playwright>=1.63.0",
+    "crawlee[playwright]>=1.10.1",
 ]
 
 [dependency-groups]
@@ -17,6 +21,8 @@ dev = [
 
 [project.scripts]
 kpi-crawler = "kpi_crawler.cli:main"
+kpi-crawler-retrieval = "kpi_crawler.retrieval.cli:main"
+kpi-crawler-acquire = "kpi_crawler.acquisition_engine.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

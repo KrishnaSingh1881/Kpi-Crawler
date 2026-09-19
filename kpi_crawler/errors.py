@@ -27,3 +27,11 @@ class OperationalLimitError(ApplicationError):
 
 class ExportError(ApplicationError):
     """Raised when a run cannot be exported."""
+
+
+class KPIDictionaryError(ApplicationError):
+    """Raised when the configured KPI dictionary file is missing or malformed."""
+
+
+class EmbeddingError(ApplicationError):
+    """Raised when the local embedding runtime cannot be reached or fails."""
