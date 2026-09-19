@@ -6,3 +6,5 @@ __pycache__/
 *.egg-info/
 .data/
 graphify-out/
+DOC-20260901-WA0019.xlsx
+*.xlsx

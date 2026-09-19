@@ -17,6 +17,7 @@ Semantic retrieval baseline (measurement only). See "Retrieval baseline" below. 
 - Initial foundation migration creating the `app` schema.
 - CLI commands: `start` validates configuration and starts the application boundary; `migrate` applies SQL migrations.
 - Shared logging and expected-error conventions.
+- Untracked and gitignored fixture workbook `DOC-20260901-WA0019.xlsx`; documented full execution instructions across all entry points in `AGENTS.md`.
 - Focused unit tests for configuration and migration discovery.
 - Local PostgreSQL development service in `docker-compose.yml`.
 - Acquisition storage schema for `acquisition_runs`, `acquisition_events`, and `artifacts`.
