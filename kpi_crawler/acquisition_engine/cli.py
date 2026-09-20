@@ -16,6 +16,7 @@ from.
 """
 
 import argparse
+import asyncio
 from datetime import datetime
 from pathlib import Path
 import re
@@ -261,7 +262,6 @@ def main(argv: list[str] | None = None) -> int:
             max_depth=args.max_depth,
             max_artifacts=args.max_artifacts,
             max_concurrency=args.max_concurrency,
-            initial_concurrency=min(8, args.max_concurrency),
             enable_browser_escalation=not args.no_browser,
             timeout_seconds=settings.acquisition_timeout_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
@@ -297,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
 
             signal.signal(signal.SIGINT, handle_sigint)
             try:
-                summary, run_id = engine.run(args.source_url)
+                summary, run_id = asyncio.run(engine.run(args.source_url))
             finally:
                 signal.signal(signal.SIGINT, previous_handler)
 

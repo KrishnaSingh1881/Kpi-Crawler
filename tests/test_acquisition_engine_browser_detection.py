@@ -1,6 +1,6 @@
 import unittest
 
-from kpi_crawler.acquisition_engine.browser_acquirer import dynamic_content_likely
+from kpi_crawler.acquisition_engine.engine import dynamic_content_likely
 
 SPA_SHELL = b"""
 <!DOCTYPE html><html><head>

@@ -10,6 +10,7 @@ Proves:
 7. run_id links filesystem, Postgres metadata, artifacts and evidence
 """
 
+import asyncio
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -224,13 +225,12 @@ class RunScopedStorageIntegrationTests(unittest.TestCase):
             max_depth=1,
             max_artifacts=10,
             max_concurrency=2,
-            initial_concurrency=2,
             enable_browser_escalation=False,
             storage_dir=base_dir or self.storage_dir,
         )
         sink = ListEventSink()
         engine = AcquisitionEngine(config, self.ledger, sink)
-        summary, run_id = engine.run(url)
+        summary, run_id = asyncio.run(engine.run(url))
         return summary, run_id, engine
 
     def test_requirement_1_different_websites_get_separate_directories(self):

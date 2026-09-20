@@ -3,8 +3,16 @@ in-flight work finishes, no new work gets scheduled, and a real final
 summary is always produced — against a real local server and a real engine
 run (`AcquisitionEngine.request_shutdown()`, the same method the CLI's
 SIGINT handler calls).
+
+`request_shutdown()` delegates entirely to crawlee's own `Crawler.stop()`.
+Its exact semantics (new task scheduling stops immediately; already-running
+tasks are allowed to finish) were verified by reading crawlee 1.10.1's
+`BasicCrawler.__is_task_ready_function`/`__is_finished_function` during the
+Crawlee port (Stage 0), not assumed — these tests confirm that behavior
+holds end-to-end through the engine.
 """
 
+import asyncio
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
@@ -12,8 +20,6 @@ import tempfile
 import threading
 import time
 import unittest
-
-import psycopg
 
 from kpi_crawler.acquisition_engine.contract import AcquisitionState
 from kpi_crawler.acquisition_engine.engine import AcquisitionEngine, EngineConfig
@@ -79,7 +85,6 @@ class InterruptionIntegrationTests(unittest.TestCase):
             max_depth=2,
             max_artifacts=20,
             max_concurrency=4,
-            initial_concurrency=4,
             max_retries=0,
             enable_browser_escalation=False,
             storage_dir=Path(self.storage_dir.name),
@@ -92,7 +97,7 @@ class InterruptionIntegrationTests(unittest.TestCase):
         engine, ledger = self._engine(sink)
         engine.request_shutdown()
 
-        summary, run_id = engine.run(self.base_url + "/")
+        summary, run_id = asyncio.run(engine.run(self.base_url + "/"))
 
         self.assertEqual(summary.status, AcquisitionState.INTERRUPTED)
         self.assertEqual(summary.attempted, 0)
@@ -106,14 +111,17 @@ class InterruptionIntegrationTests(unittest.TestCase):
         sink = ListEventSink()
         engine, ledger = self._engine(sink)
 
-        def interrupt_soon():
-            time.sleep(0.1)  # well before /slow (0.3s) finishes its wave
-            engine.request_shutdown()
+        async def run_with_interrupt():
+            async def interrupt_soon():
+                await asyncio.sleep(0.1)  # well before /slow (0.3s) finishes
+                engine.request_shutdown()
 
-        interrupter = threading.Thread(target=interrupt_soon)
-        interrupter.start()
-        summary, run_id = engine.run(self.base_url + "/")
-        interrupter.join(timeout=2)
+            interrupter = asyncio.create_task(interrupt_soon())
+            result = await engine.run(self.base_url + "/")
+            await interrupter
+            return result
+
+        summary, run_id = asyncio.run(run_with_interrupt())
 
         self.assertEqual(summary.status, AcquisitionState.INTERRUPTED)
 
@@ -129,7 +137,7 @@ class InterruptionIntegrationTests(unittest.TestCase):
         sink = ListEventSink()
         engine, ledger = self._engine(sink)
         engine.request_shutdown()
-        summary, run_id = engine.run(self.base_url + "/")
+        summary, run_id = asyncio.run(engine.run(self.base_url + "/"))
 
         row = self.conn.execute("SELECT status FROM acq.runs WHERE id = %s", (run_id,)).fetchone()
         self.assertEqual(row[0], "INTERRUPTED")
@@ -139,7 +147,7 @@ class InterruptionIntegrationTests(unittest.TestCase):
         sink = ListEventSink()
         engine, ledger = self._engine(sink)
         engine.request_shutdown()
-        summary, run_id = engine.run(self.base_url + "/")
+        summary, run_id = asyncio.run(engine.run(self.base_url + "/"))
 
         self.assertNotEqual(summary.status, AcquisitionState.SUCCESS)
         final_event = next(e for e in sink.events if isinstance(e, FinalSummaryEvent))
@@ -149,7 +157,7 @@ class InterruptionIntegrationTests(unittest.TestCase):
         sink = ListEventSink()
         engine, ledger = self._engine(sink)
         engine.request_shutdown()
-        engine.run(self.base_url + "/")
+        asyncio.run(engine.run(self.base_url + "/"))
 
         important = [e for e in sink.events if isinstance(e, ImportantEvent)]
         self.assertTrue(any("INTERRUPTED" in e.headline for e in important))
