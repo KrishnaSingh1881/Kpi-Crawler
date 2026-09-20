@@ -10,10 +10,12 @@ Thread-safe (backed by a single lock): sessions are acquired, reported on,
 and retired concurrently from the engine's worker threads.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import itertools
 import threading
+
+from kpi_crawler.acquisition_engine.health import FailureCounter
 
 
 class SessionHealth(str, Enum):
@@ -26,8 +28,13 @@ class SessionHealth(str, Enum):
 class Session:
     session_id: str
     health: SessionHealth = SessionHealth.HEALTHY
-    consecutive_failures: int = 0
     requests_served: int = 0
+    # unhealthy_after_failures is set by SessionManager when creating a session
+    _failure_counter: FailureCounter = field(default_factory=lambda: FailureCounter(unhealthy_after_failures=3))
+
+    @property
+    def consecutive_failures(self) -> int:  # kept for any callers that read it directly
+        return self._failure_counter.consecutive_failures
 
 
 class SessionManager:
@@ -62,7 +69,10 @@ class SessionManager:
 
     def _create_locked(self) -> Session:
         session_id = f"{self._prefix}_{next(self._counter)}"
-        session = Session(session_id=session_id)
+        session = Session(
+            session_id=session_id,
+            _failure_counter=FailureCounter(unhealthy_after_failures=self._unhealthy_after_failures),
+        )
         self._sessions[session_id] = session
         return session
 
@@ -94,7 +104,7 @@ class SessionManager:
             session = self._sessions.get(session_id)
             if session is None:
                 return
-            session.consecutive_failures = 0
+            session._failure_counter.report_success()
             session.requests_served += 1
             if session.health == SessionHealth.UNHEALTHY:
                 session.health = SessionHealth.HEALTHY
@@ -104,8 +114,8 @@ class SessionManager:
             session = self._sessions.get(session_id)
             if session is None:
                 return SessionHealth.RETIRED
-            session.consecutive_failures += 1
-            if session.consecutive_failures >= self._unhealthy_after_failures:
+            threshold_crossed = session._failure_counter.report_failure()
+            if threshold_crossed:
                 session.health = SessionHealth.UNHEALTHY
             return session.health
 
