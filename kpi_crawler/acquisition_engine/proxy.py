@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from itertools import cycle
 
+from kpi_crawler.acquisition_engine.health import FailureCounter
+
 
 class ProxyHealthState(str, Enum):
     HEALTHY = "healthy"
@@ -27,7 +29,13 @@ class ProxyConfig:
 class _ProxyState:
     config: ProxyConfig
     health: ProxyHealthState = ProxyHealthState.HEALTHY
-    consecutive_failures: int = 0
+    # consecutive_failures is owned by _failure_counter; the property below
+    # preserves read access for any callers that inspect it directly.
+    _failure_counter: FailureCounter = field(default_factory=lambda: FailureCounter(unhealthy_after_failures=3))
+
+    @property
+    def consecutive_failures(self) -> int:
+        return self._failure_counter.consecutive_failures
 
 
 @dataclass
@@ -36,7 +44,13 @@ class ProxyPool:
     failure_threshold: int = 3
 
     def __post_init__(self) -> None:
-        self._states: dict[str, _ProxyState] = {c.proxy_id: _ProxyState(c) for c in self.configs}
+        self._states: dict[str, _ProxyState] = {
+            c.proxy_id: _ProxyState(
+                c,
+                _failure_counter=FailureCounter(unhealthy_after_failures=self.failure_threshold),
+            )
+            for c in self.configs
+        }
         self._rotation = cycle(self._states.keys()) if self._states else None
 
     def acquire(self) -> ProxyConfig | None:
@@ -62,7 +76,7 @@ class ProxyPool:
         if state is None:
             return False
         recovered = state.health != ProxyHealthState.HEALTHY
-        state.consecutive_failures = 0
+        state._failure_counter.report_success()
         state.health = ProxyHealthState.HEALTHY
         return recovered
 
@@ -74,8 +88,8 @@ class ProxyPool:
         state = self._states.get(proxy_id)
         if state is None:
             return ProxyHealthState.HEALTHY
-        state.consecutive_failures += 1
-        if state.consecutive_failures >= self.failure_threshold:
+        threshold_crossed = state._failure_counter.report_failure()
+        if threshold_crossed:
             state.health = ProxyHealthState.QUARANTINED
         else:
             state.health = ProxyHealthState.UNHEALTHY
