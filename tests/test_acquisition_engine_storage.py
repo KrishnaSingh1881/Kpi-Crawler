@@ -10,17 +10,26 @@ Proves:
 7. run_id links filesystem, Postgres metadata, artifacts and evidence
 """
 
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import threading
 import unittest
 
 import psycopg
 
-from kpi_crawler.acquisition_engine.contract import AcquisitionState, RedirectHop
+from kpi_crawler.acquisition_engine.contract import (
+    AcquisitionState,
+    AdaptiveDecisionRecord,
+    ArtifactRecord,
+    AttemptRecord,
+    RedirectHop,
+    RunSummary,
+)
 from kpi_crawler.acquisition_engine.engine import AcquisitionEngine, EngineConfig
 from kpi_crawler.acquisition_engine.events import ListEventSink
 from kpi_crawler.acquisition_engine.ledger import EvidenceLedger
@@ -98,6 +107,91 @@ class StorageHelperUnitTests(unittest.TestCase):
             # Path traversal attempt fails with StorageError
             with self.assertRaises(StorageError):
                 storage.write_raw_artifact(b"evil", "../../../escaped", "text/html")
+
+    def test_write_report_generates_self_contained_html(self):
+        """report.html is generated, contains the run_id, and its embedded
+        data matches the artifacts/attempts/decisions passed in."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base_dir = Path(tmp)
+            storage = RunStorage(base_dir, "example.com", 42)
+            raw_path = storage.write_raw_artifact(b"<html>hi</html>", "b" * 64, "text/html", "https://example.com/")
+
+            summary = RunSummary(
+                run_id=42, contract_version=2, root_source_url="https://example.com/",
+                started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                completed_at=datetime(2026, 1, 1, 0, 0, 5, tzinfo=timezone.utc),
+                status=AcquisitionState.PARTIAL, discovered=2, attempted=2, acquired=1,
+                partial=0, failed=1, retries=1, rate_limited=0, browser_pages=0,
+                proxy_failures=0, by_state={"SUCCESS": 1, "NOT_FOUND": 1},
+            )
+            artifacts = [
+                ArtifactRecord(
+                    contract_version=2, artifact_id=1, run_id=42, source_url="https://example.com/",
+                    canonical_url=None, discovered_from=None,
+                    fetched_at=datetime(2026, 1, 1, tzinfo=timezone.utc), content_type="text/html",
+                    http_status=200, acquisition_method="http", raw_location=str(raw_path),
+                    content_size=16, checksum="b" * 64, encoding=None, final_url=None,
+                    redirect_chain=(), session_id="s1", status=AcquisitionState.SUCCESS,
+                ),
+            ]
+            attempts = [
+                AttemptRecord(
+                    run_id=42, attempt_id=1, occurred_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    url="https://example.com/", domain="example.com", acquisition_method="http",
+                    session_id="s1", proxy_id=None, proxy_status=None, http_status=200,
+                    latency_ms=12.5, retry_number=0, retry_budget=3, timeout_seconds=10.0,
+                    backoff_applied_seconds=None, concurrency_at_attempt=8, rate_limit_detected=False,
+                    failure_classification=None, adaptive_decision=None,
+                    final_result=AcquisitionState.SUCCESS, artifact_id=1, error_message=None,
+                ),
+                AttemptRecord(
+                    run_id=42, attempt_id=2, occurred_at=datetime(2026, 1, 1, 0, 0, 1, tzinfo=timezone.utc),
+                    url="https://example.com/missing", domain="example.com", acquisition_method="http",
+                    session_id="s1", proxy_id=None, proxy_status=None, http_status=404,
+                    latency_ms=8.0, retry_number=0, retry_budget=3, timeout_seconds=10.0,
+                    backoff_applied_seconds=None, concurrency_at_attempt=8, rate_limit_detected=False,
+                    failure_classification="http_404", adaptive_decision=None,
+                    final_result=AcquisitionState.NOT_FOUND, artifact_id=None, error_message="404 Not Found",
+                ),
+            ]
+            decisions = [
+                AdaptiveDecisionRecord(
+                    run_id=42, decision_id=1, occurred_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    domain="example.com", decision_type="concurrency_reduced", reason="429 detected",
+                    before_value="8", after_value="4", details={},
+                ),
+            ]
+
+            report_path = storage.write_report(summary, artifacts, attempts, decisions)
+
+            self.assertTrue(report_path.exists())
+            self.assertEqual(report_path, storage.run_dir / "report.html")
+            html = report_path.read_text(encoding="utf-8")
+            self.assertIn("42", html)
+
+            match = re.search(
+                r'<script type="application/json" id="report-data">(.*?)</script>', html, re.DOTALL
+            )
+            self.assertIsNotNone(match)
+            embedded = json.loads(match.group(1))
+
+            self.assertEqual(embedded["summary"]["run_id"], 42)
+            self.assertEqual(embedded["summary"]["status"], "PARTIAL")
+            self.assertEqual(embedded["summary"]["by_state"], {"SUCCESS": 1, "NOT_FOUND": 1})
+
+            self.assertEqual(len(embedded["attempts"]), 2)
+            urls = {a["url"] for a in embedded["attempts"]}
+            self.assertEqual(urls, {"https://example.com/", "https://example.com/missing"})
+            not_found = next(a for a in embedded["attempts"] if a["url"] == "https://example.com/missing")
+            self.assertEqual(not_found["final_result"], "NOT_FOUND")
+            self.assertEqual(not_found["error_message"], "404 Not Found")
+
+            self.assertEqual(len(embedded["artifacts"]), 1)
+            self.assertEqual(embedded["artifacts"][0]["checksum"], "b" * 64)
+            self.assertEqual(embedded["artifacts"][0]["raw_location"], "raw/html/" + "b" * 64 + ".raw")
+
+            self.assertEqual(len(embedded["decisions"]), 1)
+            self.assertEqual(embedded["decisions"][0]["decision_type"], "concurrency_reduced")
 
 
 @unittest.skipUnless(DATABASE_URL, "DATABASE_URL is required for storage integration tests")
@@ -319,6 +413,33 @@ class RunScopedStorageIntegrationTests(unittest.TestCase):
         self.assertTrue((run_dir / "program2" / "artifacts.json").is_file())
         self.assertTrue((run_dir / "program2" / "metadata.json").is_file())
         self.assertTrue((run_dir / "program2" / "provenance.json").is_file())
+        self.assertTrue((run_dir / "report.html").is_file())
+
+    def test_report_html_generated_by_real_engine_run(self):
+        """report.html is produced end-to-end alongside manifest.json/program2/
+        for a real engine run, referencing raw/ artifacts by a relative path
+        that resolves from report.html's own location."""
+        url = f"{self.base_url}/"
+        summary, run_id, engine = self._run_engine(url)
+        run_dir = engine._run_storage.run_dir
+
+        report_path = run_dir / "report.html"
+        self.assertTrue(report_path.is_file())
+        html = report_path.read_text(encoding="utf-8")
+        self.assertIn(str(run_id), html)
+
+        match = re.search(r'<script type="application/json" id="report-data">(.*?)</script>', html, re.DOTALL)
+        self.assertIsNotNone(match)
+        embedded = json.loads(match.group(1))
+        self.assertEqual(embedded["summary"]["run_id"], run_id)
+        self.assertGreaterEqual(len(embedded["artifacts"]), 1)
+        self.assertGreaterEqual(len(embedded["attempts"]), 1)
+
+        # raw_location is relative and resolves from report.html's own directory.
+        for artifact in embedded["artifacts"]:
+            raw_location = artifact["raw_location"]
+            self.assertFalse(Path(raw_location).is_absolute())
+            self.assertTrue((run_dir / raw_location).is_file())
 
 
 if __name__ == "__main__":

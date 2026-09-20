@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KPI Crawler Artifact Viewer & Exporter</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-icon">📁</div>
+        <div>
+          <div class="brand-title">KPI Viewer</div>
+          <div class="brand-sub">Artifact & Run Explorer</div>
+        </div>
+      </div>
+      <div class="run-list-section">
+        <div class="section-label">Crawl Runs</div>
+        <div id="runs-list">
+          <!-- Populated by JS -->
+          <div class="empty-state">Loading runs...</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="top-bar">
+        <div class="run-info">
+          <h2 id="current-run-title">Select a Run</h2>
+          <p id="current-run-subtitle">Choose a crawl run from the sidebar to inspect artifacts</p>
+        </div>
+        <div class="actions-group">
+          <button id="btn-export-run" class="btn btn-primary" disabled>
+            <span>📥</span> Export All (Real Extensions)
+          </button>
+        </div>
+      </header>
+
+      <!-- Filter & Search Controls -->
+      <div class="controls-bar">
+        <div class="filter-pills" id="filter-pills">
+          <button class="pill active" data-category="ALL">All (<span id="cnt-all">0</span>)</button>
+          <button class="pill" data-category="html">🌐 HTML (<span id="cnt-html">0</span>)</button>
+          <button class="pill" data-category="pdf">📄 PDF (<span id="cnt-pdf">0</span>)</button>
+          <button class="pill" data-category="json">📜 JSON (<span id="cnt-json">0</span>)</button>
+          <button class="pill" data-category="xml">📊 XML / Feeds (<span id="cnt-xml">0</span>)</button>
+          <button class="pill" data-category="other">📁 Other (<span id="cnt-other">0</span>)</button>
+        </div>
+        <div class="search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" class="search-input" placeholder="Search title or URL...">
+        </div>
+      </div>
+
+      <!-- Artifact Cards Grid -->
+      <section class="artifacts-container">
+        <div id="artifact-grid" class="artifact-grid">
+          <div class="empty-state">
+            <div class="empty-icon">👈</div>
+            <div>Select a run from the left panel to get started</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Preview Modal -->
+  <div id="preview-modal" class="modal-overlay">
+    <div class="modal-container">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">Artifact Preview</div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <a id="modal-download-btn" class="btn btn-secondary" href="#" download>📥 Download File</a>
+          <button class="modal-close" id="modal-close-btn">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="modal-body">
+        <!-- Dynamic iframe or pre/code view -->
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

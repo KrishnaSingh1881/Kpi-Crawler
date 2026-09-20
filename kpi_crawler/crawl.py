@@ -2,8 +2,12 @@
 
 Generic web mechanics only: link-following, nested pages, downloadable
 resources, sitemap/robots.txt discovery, and standards-based pagination
-(`rel="next"`). No relevance scoring, semantic classification, filename-based
-filtering, or priority tiers — every discovered, in-bounds URL is acquired.
+(`rel="next"`) and resource-reference (`rel="stylesheet"|"icon"|...`)
+handling. No relevance scoring, semantic classification, or filename-based
+filtering — every discovered, in-bounds *page* is acquired; a `<link>`
+tagged by the HTML standard itself as a page-independent resource reference
+(not inferred from its URL) is not added to the crawl frontier, though it
+remains acquirable directly if ever given as an explicit target.
 
 One `acquisition_runs` row covers the whole crawl. Every fetch (root, sitemap,
 robots.txt, or a discovered link/resource) is one `_process_source` call, so it
@@ -150,6 +154,8 @@ def run_crawl(
             # ordinary nested-page links cannot.
             base_url = outcome.resolved_url or item.url
             for link in discover_links(base_url, outcome.content, outcome.content_type or ""):
+                if link.is_resource_reference:
+                    continue
                 next_depth = item.depth if link.is_pagination else item.depth + 1
                 if next_depth > max_depth:
                     continue

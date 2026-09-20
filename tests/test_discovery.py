@@ -57,6 +57,26 @@ class ExtractHtmlLinksTests(unittest.TestCase):
             {"https://example.test/report.pdf", "https://example.test/notes.docx"},
         )
 
+    def test_flags_stylesheet_and_icon_links_as_resource_references(self):
+        html = b"""
+        <link rel="stylesheet" href="/theme.css">
+        <link rel="shortcut icon" href="/favicon.ico">
+        <a href="/about">About</a>
+        """
+        links = extract_html_links(html, "https://example.test/")
+        by_url = {link.url: link.is_resource_reference for link in links}
+        self.assertTrue(by_url["https://example.test/theme.css"])
+        self.assertTrue(by_url["https://example.test/favicon.ico"])
+        self.assertFalse(by_url["https://example.test/about"])
+
+    def test_does_not_infer_resource_reference_from_extension(self):
+        # A .css URL with no rel attribute at all (e.g. an <a href>) is not
+        # flagged — the signal is the standards-defined rel value, never the
+        # filename.
+        html = b'<a href="/report.css">Report</a>'
+        links = extract_html_links(html, "https://example.test/")
+        self.assertFalse(links[0].is_resource_reference)
+
 
 class ExtractSitemapLocationsTests(unittest.TestCase):
     def test_extracts_urlset_locations(self):

@@ -2,9 +2,16 @@
 
 These are pure, structural parsing functions over already-acquired bytes: no
 network I/O, no database access, and no judgment about which discovered URLs
-are worth following. That decision (depth, host, dedup, budget) belongs to the
-crawl orchestrator in `kpi_crawler.crawl`. Nothing here classifies a resource
-by its filename or content, ranks it, or infers relevance; a link is a link.
+are worth following based on their filename or content. That decision
+(depth, host, dedup, budget) belongs to the crawl orchestrator
+(`kpi_crawler.crawl`, or `acquisition_engine.engine`). A link is a link —
+except for one standards-defined signal: a `<link>` tag's `rel` value can
+mark it as a page-independent resource reference (`stylesheet`, `icon`,
+`preload`, `manifest`, ...) rather than a page, exactly the same category of
+signal as the existing `rel="next"` pagination flag below — read from the
+HTML itself, never inferred from a URL's extension or content. Both flags
+are surfaced on `DiscoveredLink` for the orchestrator to act on; nothing
+here decides to skip or follow anything.
 """
 
 from dataclasses import dataclass
@@ -15,11 +22,18 @@ from xml.etree import ElementTree
 
 FOLLOWABLE_SCHEMES = frozenset({"http", "https", "file", ""})
 
+# rel values (RFC 8288 / WHATWG HTML link types) that name a page-independent
+# resource a page depends on, rather than another page to navigate to.
+_RESOURCE_REL_TOKENS = frozenset(
+    {"stylesheet", "icon", "apple-touch-icon", "apple-touch-icon-precomposed", "mask-icon", "preload", "manifest"}
+)
+
 
 @dataclass(frozen=True)
 class DiscoveredLink:
     url: str
     is_pagination: bool
+    is_resource_reference: bool = False
 
 
 class _LinkParser(HTMLParser):
@@ -39,8 +53,10 @@ class _LinkParser(HTMLParser):
 def extract_html_links(html_bytes: bytes, base_url: str) -> tuple[DiscoveredLink, ...]:
     """Extract `<a href>`/`<link href>` targets, resolved against `base_url`.
 
-    A `rel="next"` link is flagged as pagination (a real HTML/web standard),
-    never inferred from link text, CSS classes, or position on the page.
+    A `rel="next"` link is flagged as pagination, and a `rel` naming a
+    page-independent resource (`stylesheet`, `icon`, ...) is flagged as
+    `is_resource_reference` — both real HTML/web standards, never inferred
+    from link text, CSS classes, a URL's extension, or position on the page.
     """
     parser = _LinkParser()
     parser.feed(html_bytes.decode("utf-8", errors="replace"))
@@ -54,8 +70,12 @@ def extract_html_links(html_bytes: bytes, base_url: str) -> tuple[DiscoveredLink
         if urlsplit(absolute).scheme not in FOLLOWABLE_SCHEMES:
             continue
         seen.add(absolute)
-        is_pagination = bool(rel) and "next" in rel.split()
-        results.append(DiscoveredLink(url=absolute, is_pagination=is_pagination))
+        rel_tokens = set(rel.split()) if rel else set()
+        is_pagination = "next" in rel_tokens
+        is_resource_reference = bool(rel_tokens & _RESOURCE_REL_TOKENS)
+        results.append(
+            DiscoveredLink(url=absolute, is_pagination=is_pagination, is_resource_reference=is_resource_reference)
+        )
     return tuple(results)
 
 

@@ -9,3 +9,8 @@ graphify-out/
 DOC-20260901-WA0019.xlsx
 *.xlsx
 demo.sh
+.agents/
+agents.md
+AGENTS.md
+exports/
+skills-lock.json

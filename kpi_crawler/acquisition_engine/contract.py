@@ -11,7 +11,16 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
+
+# v2: added AcquisitionState.NOT_FOUND. A 404 (resource genuinely does not
+# exist) was previously folded into NETWORK_ERROR, which made it
+# indistinguishable from a real connectivity failure to both a human reading
+# `final_result` and to the session/proxy health signals that key off it —
+# a session or proxy was penalized identically for "the site is blocking us"
+# and "this URL was never there in the first place". NOT_FOUND is a
+# TERMINAL_FAILURE_STATE like the others; nothing about ARTIFACT_PRODUCING
+# or the run-status rollup changes.
 
 
 class AcquisitionState(str, Enum):
@@ -29,6 +38,7 @@ class AcquisitionState(str, Enum):
     ACCESS_DENIED = "ACCESS_DENIED"
     TIMEOUT = "TIMEOUT"
     NETWORK_ERROR = "NETWORK_ERROR"
+    NOT_FOUND = "NOT_FOUND"
     BROWSER_ERROR = "BROWSER_ERROR"
     UNSUPPORTED = "UNSUPPORTED"
     BLOCKED = "BLOCKED"
@@ -52,6 +62,7 @@ TERMINAL_FAILURE_STATES = frozenset(
         AcquisitionState.ACCESS_DENIED,
         AcquisitionState.TIMEOUT,
         AcquisitionState.NETWORK_ERROR,
+        AcquisitionState.NOT_FOUND,
         AcquisitionState.BROWSER_ERROR,
         AcquisitionState.UNSUPPORTED,
         AcquisitionState.BLOCKED,

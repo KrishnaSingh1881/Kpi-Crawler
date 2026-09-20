@@ -207,7 +207,7 @@ class AcquisitionEngine:
         """
         domain = _domain(url)
         gate = self._gate_for(domain)
-        session = self._sessions.create()
+        session = self._sessions.acquire(domain)
         retry_number = 0
         last_state = AcquisitionState.NETWORK_ERROR
         announced_timeout_escalation = False
@@ -238,7 +238,10 @@ class AcquisitionEngine:
                             run_id=run_id, domain=domain, decision_type="proxy_recovered",
                             reason="request succeeded", before_value="unhealthy", after_value="healthy",
                         )
-                else:
+                elif result.state != AcquisitionState.NOT_FOUND:
+                    # A 404 says nothing about this proxy's health — the
+                    # resource just isn't there, on any proxy. Don't let it
+                    # count toward quarantine.
                     health = self._proxies.report_failure(proxy.proxy_id)
                     if health == ProxyHealthState.QUARANTINED:
                         self._emit_important("⚠", f"Proxy {proxy.proxy_id} unhealthy", "→ Proxy quarantined")
@@ -363,16 +366,25 @@ class AcquisitionEngine:
                 self._sessions.report_success(session.session_id)
                 return state, content, content_type
 
-            health = self._sessions.report_failure(session.session_id)
-            if health == SessionHealth.UNHEALTHY:
-                old_session_id = session.session_id
-                self._sessions.retire(old_session_id)
-                if self._browser is not None:
-                    self._browser.retire_session(old_session_id)
-                session = self._sessions.create()
-                self._emit_important(
-                    "⚠", f"Session {old_session_id} retired", f"→ replacement session created: {session.session_id}",
-                )
+            if state != AcquisitionState.NOT_FOUND:
+                # A 404 says nothing about this session's health — the
+                # resource just isn't there, under any identity. Don't let
+                # it count toward retirement.
+                health = self._sessions.report_failure(session.session_id)
+                if health == SessionHealth.UNHEALTHY:
+                    old_session_id = session.session_id
+                    self._sessions.retire(old_session_id, domain)
+                    if self._browser is not None:
+                        self._browser.retire_session(old_session_id)
+                    session = self._sessions.acquire(domain)
+                    self._emit_important(
+                        "⚠", f"Session {old_session_id} retired", f"→ replacement session created: {session.session_id}",
+                    )
+                    self._ledger.record_adaptive_decision(
+                        run_id=run_id, domain=domain, decision_type="session_retired",
+                        reason="consecutive_failure_threshold", before_value=old_session_id,
+                        after_value=session.session_id,
+                    )
 
             last_state = state
             with self._stats.lock:
@@ -461,6 +473,12 @@ class AcquisitionEngine:
 
                     if state == AcquisitionState.SUCCESS and content is not None and depth < self._config.max_depth:
                         for link in discover_links(url, content, content_type or ""):
+                            if link.is_resource_reference:
+                                # A <link rel="stylesheet"|"icon"|...> — a
+                                # page-independent resource reference, not a
+                                # page to crawl. Still acquirable directly if
+                                # ever given as an explicit target.
+                                continue
                             next_depth = depth if link.is_pagination else depth + 1
                             next_wave_links.append((_normalize(link.url), next_depth, url))
 
@@ -497,6 +515,7 @@ class AcquisitionEngine:
         self._run_storage.write_evidence(attempts, decisions)
         self._run_storage.write_program2_handoff(artifacts, summary)
         self._run_storage.write_manifest(summary, artifacts)
+        self._run_storage.write_report(summary, artifacts, attempts, decisions)
 
         self._sink.emit(
             FinalSummaryEvent(

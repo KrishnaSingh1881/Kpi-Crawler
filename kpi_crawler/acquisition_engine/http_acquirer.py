@@ -27,6 +27,7 @@ USER_AGENT = f"kpi-crawler-acquisition-engine/{__version__}"
 _RATE_LIMIT_STATUSES = {429}
 _ACCESS_DENIED_STATUSES = {401, 403}
 _TIMEOUT_STATUSES = {408}
+_NOT_FOUND_STATUSES = {404}
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,11 @@ def attempt_http(
             state, classification = AcquisitionState.ACCESS_DENIED, f"http_{code}"
         elif code in _TIMEOUT_STATUSES:
             state, classification = AcquisitionState.TIMEOUT, f"http_{code}"
+        elif code in _NOT_FOUND_STATUSES:
+            # A clean "not here", not a connectivity problem — kept out of
+            # NETWORK_ERROR so it never counts against session/proxy health
+            # (see engine.py) and is never confused with a real network fault.
+            state, classification = AcquisitionState.NOT_FOUND, f"http_{code}"
         else:
             state, classification = AcquisitionState.NETWORK_ERROR, f"http_{code}"
         return HttpAttemptResult(
